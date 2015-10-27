@@ -1,0 +1,280 @@
+Manipulate[
+ Column[{
+   ParaDist[initN, 48, \[Mu], \[Sigma]],
+   DHAGraph[xm, ym, a, ke],
+   ParaGraph[initN, PMR, \[Mu], \[Sigma], 
+    48, {{KZRB, KZRE}, {KZRE + 1, KZTE}, {KZTE + 1, KZSE}}, {xm, ym, 
+     a, ke}, everyH, 
+    Ndrug, {\[Gamma]R, \[Gamma]T, \[Gamma]S}, {ec50R, ec50T, 
+     ec50S}, {0.0, 0.0, 0.0}, {emaxR, emaxT, emaxS}, T, 120]
+   }],
+ 
+ {{ctrl, 1, ""}, {1 -> "parasite distribution", 2 -> "dose regimen", 
+   3 -> "DHA concentration", 4 -> "kill zones", 
+   5 -> "killing effect"}, ControlPlacement -> Top},
+ 
+ PaneSelector[{
+   1 -> Column[{
+      Style["Parasite distribution on admission", Bold],
+      "initial number of parasites", 
+      Control@{{initN, 2.8*10^11, ""}, 1.*10^11, 10^12, 0.5*10^11, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "parasite multiplication rate (/48 hours)", 
+      Control@{{PMR, 7, ""}, 6, 32, 1, Appearance -> "Labeled", 
+        ImageSize -> Tiny},
+      "mean age of parasite (hours)", 
+      Control@{{\[Mu], 10, ""}, 1, 48, 1, Appearance -> "Labeled", 
+        ImageSize -> Tiny},
+      "standard deviation of parasite ages (hours)", 
+      Control@{{\[Sigma], 4, ""}, 1, 50, 1, Appearance -> "Labeled", 
+        ImageSize -> Tiny}}],
+   
+   2 -> Column[{
+      Style["Dose regimen", Bold],
+      "number of doses", 
+      Control@{{Ndrug, 7, ""}, 1, 24, 1, Appearance -> "Labeled", 
+        ImageSize -> Tiny},
+      "dosing interval (hours)", 
+      Control@{{everyH, 24, ""}, 1, 48, 1, Appearance -> "Labeled", 
+        ImageSize -> Tiny}}],
+   
+   3 -> Column[{
+      Style["DHA concentration profile (for each dose)", Bold],
+      "time at max concentration (hours)", 
+      Control@{{xm, 2, ""}, 1, 20, Appearance -> "Labeled", 
+        ImageSize -> Tiny},
+      "max concentration (ng/ml)", 
+      Control@{{ym, 1000, ""}, 0.5, 2000., Appearance -> "Labeled", 
+        ImageSize -> Tiny},
+      "elimination rate (/hours)", 
+      Control@{{ke, 0.5, ""}, 0.001, 10, Appearance -> "Labeled", 
+        ImageSize -> Tiny}}],
+   
+   4 -> Column[{
+      Style["Kill zones (sensitive ages) ", Bold],
+      "ring: begin kill zone (hours)", 
+      Control@{{KZRB, 6, ""}, 1, 96, 1, Appearance -> "Labeled", 
+        ImageSize -> Tiny},
+      "ring: end kill zone (hours)", 
+      Control@{{KZRE, 26, ""}, KZRB, 60, 1, Appearance -> "Labeled", 
+        ImageSize -> Tiny},
+      "trophozoite: end kill zone (hours)", 
+      Control@{{KZTE, 38, ""}, KZRE + 1, 90, 1, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "schizont: end kill zone (hours)", 
+      Control@{{KZSE, 44, ""}, KZTE + 1, 100, 1, 
+        Appearance -> "Labeled", ImageSize -> Tiny}}],
+   
+   5 -> Column[{
+      Style["Killing effect parameters", Bold],
+      Control@{{\[Gamma]R, 6.5}, 0.5, 10, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny}, 
+      Control@{{\[Gamma]T, 6.5}, 0.5, 10, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny}, 
+      Control@{{\[Gamma]S, 6.5}, 0.5, 10, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "EC50 ring (ng/ml)", 
+      Control@{{ec50R, 20.5, ""}, 0.001, 100, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "EC50 trophozoites (ng/ml)", 
+      Control@{{ec50T, 20.5, ""}, 0.001, 100, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "EC50 schizont (ng/ml)", 
+      Control@{{ec50S, 20.5, ""}, 0.001, 100, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "ring: max efficacy (%)", 
+      Control@{{emaxR, 99.99, ""}, 50, 99.999, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "trophozoite: max efficacy (%)", 
+      Control@{{emaxT, 99.99, ""}, 50, 99.999, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "schizont: max efficacy (%)", 
+      Control@{{emaxS, 99.99, ""}, 50, 99.999, 0.001, 
+        Appearance -> "Labeled", ImageSize -> Tiny},
+      "1/alpha", 
+      Control@{{T, 5., ""}, 1., 10., 0.001, Appearance -> "Labeled", 
+        ImageSize -> Tiny}}]},
+  Dynamic[ctrl]
+  ],
+ 
+ ControlPlacement -> Left, SynchronousInitialization -> False, 
+ ContinuousAction -> False, AutorunSequencing -> {1, 2},
+ Initialization :> {
+   Get["PlotLegends`"];
+   
+   (* concentration of DHA *)
+   genpoints[xm_, ym_, ke_, x_] := 
+    Piecewise[{{ym - (ym/xm)*(xm - x), 
+       x <= xm}, {ym*Exp[-ke*(x - xm)], x > xm}}];
+   
+   (*calculate the drug concentration and drug efficacy of each \
+parasite stage(Ring,Trophozoite and Schizont)*)
+   ConcMod[xm_, ym_, a_, ke_, everyH_Integer, Ndrug_Integer, 
+     gamma_List, ec50_List, emin_List, emax_List] := 
+    Module[{i, j = 0, nd = 1, dat, maxpoint, part1, part2, fitke, 
+      modka, modke, fn, x, endtime, t, conc = 0, concls = {}, 
+      TIMEMAX = 1000},
+     For[i = 0, i < Ndrug*everyH, i = i + 1, 
+      If[j != everyH, conc = genpoints[xm, ym, ke, x] /. x -> j;
+       AppendTo[
+        concls, {i, conc, 
+         Eff[conc, gamma[[1]], ec50[[1]], emin[[1]], emax[[1]]], 
+         Eff[conc, gamma[[2]], ec50[[2]], emin[[2]], emax[[2]]], 
+         Eff[conc, gamma[[3]], ec50[[3]], emin[[3]], emax[[3]]]}];
+       ];
+      If[j == everyH && nd < Ndrug, nd = nd + 1;
+       conc = conc + genpoints[xm, ym, ke, x] /. x -> j;
+       AppendTo[
+        concls, {i, conc, 
+         Eff[conc, gamma[[1]], ec50[[1]], emin[[1]], emax[[1]]], 
+         Eff[conc, gamma[[2]], ec50[[2]], emin[[2]], emax[[2]]], 
+         Eff[conc, gamma[[3]], ec50[[3]], emin[[3]], emax[[3]]]}];
+       j = 0;];
+      
+      (*update ndrug*)
+      j = j + 1;];
+     
+     For[i = Ndrug*everyH; j = everyH, i <= TIMEMAX, i = i + 1, 
+      conc = genpoints[xm, ym, ke, x] /. x -> j;
+      AppendTo[
+       concls, {i, conc, 
+        Eff[conc, gamma[[1]], ec50[[1]], emin[[1]], emax[[1]]], 
+        Eff[conc, gamma[[2]], ec50[[2]], emin[[2]], emax[[2]]], 
+        Eff[conc, gamma[[3]], ec50[[3]], emin[[3]], emax[[3]]]}];
+      j = j + 1;];
+     concls];
+   
+   (* age distribution of parasites on admission *)
+   DistributeN[initN_, LC_Integer, mu_, sigma_] := 
+    Module[{distr, x}, 
+     distr = Table[
+       PDF[NormalDistribution[mu, sigma], x] // N, {x, 1, LC}];
+     (initN/Total[distr])*distr];
+   
+   (*shift the list of number to the right with a multiplication pmr*)
+   Shiftonehour[ls_List, PMR_Integer] := Module[{tmp}, tmp = ls;
+     tmp = RotateRight[tmp];
+     tmp = ReplacePart[tmp, 1 -> tmp[[1]]*PMR];
+     tmp];
+   
+   Eff[c_, gamma_, ec50_, emin_, emax_] := 
+    emin + (emax - emin)*c^gamma/(c^gamma + ec50^gamma);
+   
+   Ki[T_Real, concls_List] := 
+    Module[{i, lsk}, 
+     lsk = Table[{1/T Log[100./(100. - concls[[i, 3]])], 
+        1/T Log[100./(100. - concls[[i, 4]])], 
+        1/T Log[100./(100. - concls[[i, 5]])]}, {i, 1, 
+        Length[concls]}];
+     lsk];
+   
+   (*decay function*)
+   Fdecay[ages_, lst_, attime_, lsk_, stages_] := Module[{tmp, i},
+     i = ages;
+     tmp = lst[[i]];
+     If[stages[[i]] == 1, tmp = lst[[i]]*Exp[-lsk[[attime, 1]]]];
+     If[stages[[i]] == 2, tmp = lst[[i]]*Exp[-lsk[[attime, 2]]]];
+     If[stages[[i]] == 3, tmp = lst[[i]]*Exp[-lsk[[attime, 3]]]];
+     tmp];
+   
+   WhichRTS[lst_List, KZ_List] := Module[{i, tmp},
+     tmp = Table[0, {Length[lst]}];
+     For[i = 1, i <= Length[lst], i = i + 1, 
+      If[IntervalMemberQ[Interval[KZ[[1]]], i] == True, 
+       tmp = ReplacePart[tmp, i -> 1];];
+      If[IntervalMemberQ[Interval[KZ[[2]]], i] == True, 
+       tmp = ReplacePart[tmp, i -> 2];];
+      If[IntervalMemberQ[Interval[KZ[[3]]], i] == True, 
+       tmp = ReplacePart[tmp, i -> 3];];];
+     tmp];
+   
+   (* sequestration function *)
+   PRingFunc[i_Integer, a1_Integer, a2_Integer] := 
+    Piecewise[{{1, i < a1}, {Exp[Log[0.5]*(i - a1)/(a2 - a1)], 
+       i >= a1}}];
+   
+   LsDot[ls1_List, ls2_List] := ls1*ls2;
+   
+   ParasiteDynamics[initN_, PMR_Integer, mu_, sigma_, hours_Integer, 
+     KZ_List, concdat_List, everyH_Integer, Ndrug_Integer, gamma_List,
+      ec50_List, emin_List, emax_List, T_Real, runMax_Integer] := 
+    Module[{runs = True, stages, concls, i, j, lst, lsk, output = {}, 
+      xm, ym, a, ke, junk, onlyring, tot},
+     
+     (*template of the drug and its effects*)
+     xm = concdat[[1]];
+     ym = concdat[[2]];
+     a = concdat[[3]];
+     ke = concdat[[4]];
+     concls = 
+      ConcMod[xm, ym, a, ke, everyH, Ndrug, gamma, ec50, emin, emax];
+     
+     (*k_i (t)*)
+     lsk = Ki[T, concls];
+     (*initial parasite load*)
+     lst = DistributeN[initN, hours, mu, sigma];
+     
+     stages = WhichRTS[lst, KZ];
+     
+     AppendTo[output, lst];
+     i = 0;
+     While[runs == True && i < runMax,
+      i = i + 1;
+      
+      (*Parasites are growing.Feed them!*)
+      lst = Shiftonehour[lst, PMR];
+      
+      (*a time to kill.*)
+      For[j = 1, j <= Length[lst], j = j + 1, 
+       lst = ReplacePart[lst, j -> Fdecay[j, lst, i, lsk, stages]];];
+      
+      (*adding a point for ploting*)
+      AppendTo[output, lst];
+      ];
+     
+     (**non sequestered parasites**)
+     junk = 
+      LsDot[#, Table[PRingFunc[i, 11, 14], {i, 1, hours}]] & /@ output;
+     onlyring = 
+      Table[{i - 1, Log10[junk[[i]] // Total]}, {i, 1, Length[junk]}];
+     
+     (*total of parasites over time*)
+     tot = 
+      Table[{i - 1, Log10@Total[output[[i]]]}, {i, 1, Length[output]}];
+     
+     {onlyring, tot}
+     ];
+   
+   ParaDist[initN_, LC_, mu_, sigma_] :=
+    ListLogPlot[DistributeN[initN, LC, mu, sigma], Filling -> Axis, 
+     ImageSize -> {350, 150}, Frame -> {True, True, False, False}, 
+     FrameLabel -> {"age of parasites (h)", "number of parasites"}, 
+     PlotStyle -> {Orange}];
+   
+   DHAGraph[xm_, ym_, a_, ke_] := Module[{points, t},
+     points = Table[{t, genpoints[xm, ym, ke, t]}, {t, 0, 20, 0.1}];
+     ListPlot[points, Joined -> True, PlotRange -> All, 
+      Frame -> {True, True, False, False}, 
+      FrameLabel -> {"time (h)", "DHA concentration (ng/ml)"}, 
+      PlotStyle -> {Red, Thick}, ImageSize -> {350, 150}]
+     ];
+   
+   ParaGraph[initN_, PMR_Integer, mu_, sigma_, hours_Integer, KZ_List,
+      concdat_List, everyH_Integer, Ndrug_Integer, gamma_List, 
+     ec50_List, emin_List, emax_List, T_Real, runMax_Integer] := 
+    ListPlot[
+     ParasiteDynamics[initN, PMR, mu, sigma, hours, KZ, concdat, 
+      everyH, Ndrug, gamma, ec50, emin, emax, T, runMax], 
+     Frame -> {True, True, False, False},
+     FrameLabel -> {"time (h)", "# of parasites (log 10)"},
+     Joined -> {True, True},
+     ImageSize -> {350, 160},
+     PlotStyle -> {{Blue, Thick}, {Gray, Thick, Dashed}},
+     PlotRange -> {{0, 125}, {0, 13}}, 
+     PlotLegends`PlotLegend -> {"Circulating", 
+       "Circulating +\n Sequestered"}, 
+     PlotLegends`LegendPosition -> {0, 0.15}, 
+     PlotLegends`LegendBorder -> None, 
+     PlotLegends`LegendShadow -> None]
+   }
+ ]
